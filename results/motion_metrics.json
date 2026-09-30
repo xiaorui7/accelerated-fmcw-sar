@@ -1,0 +1,25 @@
+{
+  "uncorrected_nrmse_to_actual_geometry": 1.0925592863976137,
+  "corrected_nrmse_to_actual_geometry": 0.0,
+  "corrected_nrmse_to_ideal_acquisition": 0.05781864497341264,
+  "point_metrics": {
+    "Ideal acquisition": {
+      "localization_error_m": 0.0,
+      "peak_magnitude": 0.9984123576444374,
+      "width_3db_x_m": 0.10045165881356864,
+      "width_3db_y_m": 0.21704199367657928
+    },
+    "Motion / nominal geometry": {
+      "localization_error_m": 0.015625,
+      "peak_magnitude": 0.2459252248069172,
+      "width_3db_x_m": 0.1752040121534582,
+      "width_3db_y_m": 0.21741047328790764
+    },
+    "Known-error correction": {
+      "localization_error_m": 0.0,
+      "peak_magnitude": 0.9981876287135529,
+      "width_3db_x_m": 0.100435246780817,
+      "width_3db_y_m": 0.2170986448087131
+    }
+  }
+}

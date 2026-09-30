@@ -1,0 +1,26 @@
+         790609 function calls in 0.557 seconds
+
+   Ordered by: cumulative time
+   List reduced from 39 to 20 due to restriction <20>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.451    0.451    0.557    0.557 backprojection.py:20(bp_reference)
+   266244    0.031    0.000    0.031    0.000 {built-in method builtins.len}
+   131072    0.020    0.000    0.020    0.000 {built-in method math.cos}
+   131072    0.019    0.000    0.019    0.000 {built-in method math.sin}
+   131072    0.019    0.000    0.019    0.000 {built-in method math.sqrt}
+   131072    0.017    0.000    0.017    0.000 {built-in method builtins.min}
+        1    0.000    0.000    0.000    0.000 backprojection.py:6(_validate)
+        1    0.000    0.000    0.000    0.000 numeric.py:2226(allclose)
+        1    0.000    0.000    0.000    0.000 numeric.py:2320(isclose)
+        1    0.000    0.000    0.000    0.000 {built-in method builtins.all}
+        6    0.000    0.000    0.000    0.000 backprojection.py:14(<genexpr>)
+        1    0.000    0.000    0.000    0.000 {method 'disable' of '_lsprof.Profiler' objects}
+        3    0.000    0.000    0.000    0.000 fromnumeric.py:2586(all)
+        1    0.000    0.000    0.000    0.000 _function_base_impl.py:1413(diff)
+        3    0.000    0.000    0.000    0.000 fromnumeric.py:86(_wrapreduction_any_all)
+        5    0.000    0.000    0.000    0.000 {method 'all' of 'numpy.ndarray' objects}
+        7    0.000    0.000    0.000    0.000 _methods.py:64(_all)
+        2    0.000    0.000    0.000    0.000 {built-in method builtins.abs}
+        8    0.000    0.000    0.000    0.000 {method 'reduce' of 'numpy.ufunc' objects}
+        1    0.000    0.000    0.000    0.000 _ufunc_config.py:472(__enter__)
