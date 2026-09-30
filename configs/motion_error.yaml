@@ -1,0 +1,11 @@
+scene: single
+pulses: 64
+seed: 2024
+jitter_m: 0.008
+offset_m: [0, 0.005]
+grid:
+  x_min: -1
+  x_max: 1
+  y_min: 9
+  y_max: 11
+  size: 129
