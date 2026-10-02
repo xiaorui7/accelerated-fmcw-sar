@@ -1,100 +1,101 @@
-# Accelerated FMCW-SAR Imaging
+# High-Performance Telemetry Processing Engine
 
-A CPU-based Python pipeline for simulating FMCW radar sweeps and reconstructing
-synthetic-aperture radar images. It is intended as a small numerical-computing
-project that demonstrates modular data processing, correctness testing, and measured
-optimization of Back-Projection (BP).
+## Overview
 
-## Demo
+Industrial test equipment produces pressure, flow, temperature, vibration, and power
+signals at different sampling rates. This Python tool turns those heterogeneous cycle
+files into validated, aligned, feature-level records that engineers can inspect or feed
+into downstream systems. It is a local developer tool with explicit data contracts,
+bounded-memory batches, interchangeable numerical backends, and reproducible benchmarks.
 
-The included example starts with a deterministic 25-point scene, generates analytic
-dechirped sweeps, applies FFT range processing, and reconstructs a complex image:
+## What It Does
 
-```bash
-python -m sar.cli reconstruct \
-  --config configs/point_targets.yaml \
-  --backend numba
-```
-
-![Reconstruction of the included 25-point scene](results/reconstruction.png)
-
-The motion example generates data along a perturbed path, reconstructs it with the
-nominal path, and then applies the known trajectory error:
-
-```bash
-python -m sar.cli motion-demo --config configs/motion_error.yaml
-```
-
-![Ideal, perturbed, and known-error-corrected reconstructions](results/motion.png)
-
-This is a controlled known-error experiment, not an autofocus implementation.
+- streams equipment cycles from a deterministic synthetic format or the public UCI
+  hydraulic-system dataset;
+- rejects missing channels, malformed files, invalid rates, inconsistent dimensions,
+  duplicate cycle IDs, NaN, infinity, and optional out-of-range values;
+- aligns multi-rate channels to a configurable common time grid using linear or nearest
+  interpolation;
+- computes mean, standard deviation, minimum, maximum, RMS, peak-to-peak, median, and
+  95th percentile features;
+- evaluates configuration-driven diagnostic thresholds without claiming predictive
+  maintenance accuracy;
+- writes `features.csv`, `flags.json`, `summary.json`, and `run_metadata.json`;
+- processes one configurable batch at a time instead of retaining an unbounded workload.
 
 ## Architecture
 
 ```text
-YAML configuration or versioned NPZ sweeps
-                    |
-     scene + trajectory + signal simulation
-                    |
-          windowed FFT range processing
-                    |
-  reference / chunked NumPy / parallel Numba BP
-                    |
-       complex image + metrics + PNG output
+External Dataset (UCI text files or synthetic NPZ cycles)
+                              |
+                       Dataset Adapter
+                              |
+                TelemetryCycle / TelemetryChannel
+                              |
+                    Validation + rate checks
+                              |
+                Multi-rate alignment/resampling
+                              |
+        Reference Python / NumPy / parallel Numba backend
+                              |
+                  Configurable diagnostic rules
+                              |
+       features.csv + flags.json + summary + run metadata
 ```
 
-The numerical modules do not depend on the CLI or plotting code. The CLI composes
-them into four workflows: `simulate`, `reconstruct`, `motion-demo`, and `benchmark`.
+Dataset parsing, business rules, numerical kernels, CLI concerns, and output writing
+remain separate. The backend registry gives every implementation the same
+`(cycles, channels, samples) -> (cycles, channels, features)` contract.
 
-## Tech Stack
+## Processing Backends
 
-- Python 3.11+
-- NumPy and SciPy for array operations and FFT processing
-- Numba for compiled, parallel CPU reconstruction
-- Matplotlib for generated figures
-- PyYAML for configuration and pytest for tests
-- psutil for sampled process-memory measurements
+- **Reference Python** uses explicit loops and sorting. It prioritizes readability and
+  supplies the numerical oracle.
+- **NumPy** performs vectorized reductions and uses bounded batches to prevent a large
+  workload-wide temporary allocation.
+- **Numba Parallel** compiles the loop structure and uses `prange` across independent
+  cycle/channel pairs. Each worker owns its output row, so threads never share writes.
 
-## Key Engineering Features
+All eight features are computed as float64. Tests require optimized results to agree
+with the reference at `rtol=1e-12, atol=1e-12`; the benchmark rejects maximum absolute
+error above `1e-10`.
 
-- **Three compatible BP implementations.** A scalar Python version serves as the
-  numerical reference. The optimized versions use bounded NumPy pixel chunks and a
-  Numba kernel parallelized over independent output pixels.
-- **Validated file and configuration boundaries.** Frozen configuration objects reject
-  invalid values and unknown fields. The versioned NPZ format stores sweeps, antenna
-  positions, and radar metadata and rejects incomplete or nonfinite inputs.
-- **Reproducible benchmarks.** Each backend and workload runs in a separate process.
-  The runner records warm-up, median/min/max BP time, complex relative error, thread
-  count, and sampled RSS to CSV together with environment metadata.
-- **Numerical checks beyond implementation agreement.** Tests cover analytic geometry,
-  FFT range and phase, interpolation boundaries, a direct matched-filter comparison,
-  target localization, and controlled trajectory error.
+## Dataset
 
-### Measured BP runtime
+The primary external example is the public
+[UCI Condition Monitoring of Hydraulic Systems dataset](https://archive.ics.uci.edu/dataset/447/condition+monitoring+of+hydraulic+systems)
+(Helwig, Pignanelli, and Schütze; DOI `10.24432/C5CW21`; CC BY 4.0). It contains 2,205
+60-second cycles. Pressure and motor-power channels are sampled at 100 Hz, flow at
+10 Hz, and temperature, vibration, and derived channels at 1 Hz.
 
-The saved benchmark used Python 3.13.12 on Windows, three timed repetitions, and four
-Numba threads. Times are warmed **BP-only** medians and exclude simulation, FFT,
-plotting, and Numba initialization.
+The external archive is not committed. Download and extract it so the selected sensor
+files and optional `profile.txt` are in one directory:
 
-| Backend | 512x512 grid, 64 pulses | Relative error vs. scalar reference |
-|---|---:|---:|
-| Scalar Python | 47.691 s | 0 |
-| Chunked NumPy | 1.005 s | 1.98e-15 |
-| Numba, 4 threads | 0.092 s | 2.60e-15 |
+```text
+data/hydraulic/
+├── PS1.txt
+├── FS1.txt
+├── TS1.txt
+├── VS1.txt
+├── EPS1.txt
+└── profile.txt
+```
 
-These speedups use the readable scalar Python implementation as the baseline; they
-are not comparisons with optimized C++, CUDA, or another SAR package. Full results
-and measurement details are in [`benchmarks/`](benchmarks/).
+`HydraulicDataset` reads one row from each selected file at a time, validates the
+expected 60-second sample count, attaches units and condition-profile metadata, and
+converts the row into the internal model. See [docs/DATASET.md](docs/DATASET.md) for all
+supported sensors and setup details. Tests, CI, and benchmarks use synthetic data and
+do not download UCI files.
 
-## Getting Started
+## Quick Start
 
 ```bash
-git clone https://github.com/xiaorui7/accelerated-fmcw-sar.git
-cd accelerated-fmcw-sar
+git clone https://github.com/xiaorui7/high-performance-telemetry-engine.git
+cd high-performance-telemetry-engine
 python -m venv .venv
 ```
 
-Activate the environment:
+Activate the environment and install:
 
 ```bash
 # Linux/macOS
@@ -102,86 +103,141 @@ source .venv/bin/activate
 
 # Windows PowerShell
 .\.venv\Scripts\Activate.ps1
-```
 
-Install and run an example:
-
-```bash
 python -m pip install -e ".[dev]"
-python -m sar.cli simulate --config configs/point_targets.yaml
-python -m sar.cli reconstruct \
-  --config configs/point_targets.yaml \
-  --input results/sweeps.npz \
-  --backend numba
 ```
 
-The equivalent installed entry point is `sar`. Run `sar --help` to list commands.
-
-Run a short benchmark before the full suite:
+Generate, validate, inspect, and process a small dataset:
 
 ```bash
-python -m sar.cli benchmark \
-  --sizes 64 128 \
-  --pulses 16 32 \
-  --repeats 3 \
-  --output benchmarks/quick.csv
+telemetry generate-synthetic data/synthetic --cycles 100 --channels 5 --samples 6000
+telemetry validate data/synthetic --config configs/telemetry.yaml
+telemetry inspect data/synthetic --config configs/telemetry.yaml
+telemetry process data/synthetic --config configs/telemetry.yaml \
+  --backend numba --threads 4 --batch-size 64 --output results
 ```
 
-The default benchmark includes a slow scalar 512x512 case and can take several
-minutes. Benchmark results depend on the machine, thread count, and system load.
+## Example Workflow
 
-## Tests
+Input is a directory of individual synthetic cycle archives or the extracted UCI text
+files. `process` validates each batch, aligns selected channels, computes features with
+one backend, applies rules, writes rows immediately, releases the batch, and continues.
+
+```text
+data/synthetic/cycles/cycle_000000.npz
+             -> alignment at 10 Hz
+             -> pressure_1_mean, vibration_1_rms, ...
+             -> HIGH_VIBRATION (only if configured threshold is crossed)
+             -> results/features.csv + results/flags.json
+```
+
+The generated metadata records backend, actual Numba thread count, batch size,
+configuration, channels, input source, package versions, OS, Python version, command,
+and UTC timestamp.
+
+## Performance
+
+The saved study used 1,000 cycles × 5 channels × 600 aligned float64 samples on an
+Intel Core Ultra 9 285H with Windows 11, Python 3.13.12, NumPy 2.4.4, and Numba 0.68.0.
+Each case ran in a fresh process for three repetitions. Times below are medians for
+feature processing in batches of 128; input generation, alignment, file I/O, rule
+evaluation, and output writing are outside the timed region. Numba compilation is
+excluded from steady-state timing and recorded separately.
+
+| Backend | Threads | Workload | Median | Throughput | vs Reference | Max abs error |
+|---|---:|---:|---:|---:|---:|---:|
+| Reference Python | 1 | 1,000 cycles | 1.254950 s | 796.8 cycles/s | 1.00× | 0 |
+| NumPy | 1 | 1,000 cycles | 0.178336 s | 5,607.4 cycles/s | 7.04× | 4.62e-14 |
+| Numba | 1 | 1,000 cycles | 0.195116 s | 5,125.1 cycles/s | 6.43× | 2.22e-16 |
+| Numba | 2 | 1,000 cycles | 0.074541 s | 13,415.5 cycles/s | 16.84× | 2.22e-16 |
+| Numba | 4 | 1,000 cycles | 0.045894 s | 21,789.2 cycles/s | **27.34×** | 2.22e-16 |
+
+These results compare against a deliberately readable Python oracle, not optimized C++
+or a distributed system. Full p95, warm-up, environment, and RSS data are in
+[`benchmarks/benchmark_report.md`](benchmarks/benchmark_report.md).
+
+## Batch Processing
+
+The batch study generated and released one batch at a time. Feature-call runtime excludes
+synthetic generation; sampled process RSS includes both generation and processing.
+
+| Batch | Median feature time | Throughput | Sampled peak RSS | RSS increase |
+|---:|---:|---:|---:|---:|
+| 32 | 0.048952 s | 20,428.3 cycles/s | 108.8 MiB | 1.7 MiB |
+| 64 | 0.036685 s | 27,258.9 cycles/s | 110.4 MiB | 3.9 MiB |
+| 128 | 0.054888 s | 18,219.0 cycles/s | 113.1 MiB | 6.4 MiB |
+| 256 | 0.048978 s | 20,417.2 cycles/s | 118.9 MiB | 12.1 MiB |
+
+The measurements show the resource trade-off directly: the smallest batch used about
+10.4 MiB less peak RSS than batch 256, while batch 64 achieved the highest throughput
+in this run. RSS is sampled every millisecond, so brief peaks and allocator reuse can
+affect the exact values.
+
+## Correctness
+
+The reference backend is the oracle for the two optimized implementations. Unit tests
+also check features against hand-computed values, verify interpolation on known signals,
+and exercise malformed data independently of backend agreement. The formal benchmark
+found maximum absolute differences of `4.62e-14` for NumPy and `2.22e-16` for Numba,
+both below the `1e-10` benchmark guard.
+
+## Testing
 
 ```bash
 python -m pytest -q
+python -m pytest --cov=telemetry_engine --cov-report=term-missing -q
 ```
 
-The tests cover the numerical model, agreement among BP backends, configuration and
-archive validation, motion-error behavior, CLI workflows, and benchmark artifact
-generation. GitHub Actions is configured to run the suite on Python 3.11 and 3.13 on
-Linux and Windows.
+The current local result is **40 passed** with **76% measured statement coverage**.
+GitHub Actions runs installation, the full suite, CLI help, synthetic generation,
+validation, and a Numba processing smoke test on Windows and Linux with Python 3.11
+and 3.13.
 
 ## Project Structure
 
 ```text
-src/sar/       numerical pipeline, storage, metrics, CLI, and benchmark runner
-tests/         focused unit and integration tests
-configs/       reproducible single-target, multi-target, and motion examples
-examples/      one-command local demo
-benchmarks/    profiling script and saved machine-specific measurements
-results/       selected example figures and motion metrics
-docs/          numerical design, provenance, and real-data investigation
+src/telemetry_engine/
+├── datasets/          UCI and deterministic synthetic adapters
+├── model.py           dataset-independent cycle/channel representation
+├── validation.py      boundary and cross-cycle validation
+├── alignment.py       configurable multi-rate resampling
+├── features.py        Reference, NumPy, and Numba feature backends
+├── rules.py           threshold-based diagnostic flags
+├── pipeline.py        bounded-memory orchestration and outputs
+├── benchmark.py       isolated timing, correctness, and RSS study
+└── cli.py             developer commands and error handling
+tests/                 unit, integration, failure-path, CLI, and benchmark tests
+configs/telemetry.yaml example alignment, batching, validation, and rule configuration
+benchmarks/             measured CSV, JSON, and Markdown artifacts
+docs/                  dataset setup, design, final audit, resume, interview notes
 ```
 
-## Design Decisions
+## Engineering Decisions
 
-- **Keep a slow reference implementation.** It is easier to inspect and provides an
-  oracle for optimized kernels. Agreement with it is supplemented by independent
-  analytic tests because shared bugs can affect every backend.
-- **Chunk vectorized work.** Processing at most 8,192 pixels at a time avoids allocating
-  full pulse-by-image temporary arrays while retaining NumPy's compiled operations.
-- **Parallelize independent pixels.** Each Numba worker owns one output pixel and
-  accumulates pulses sequentially, avoiding shared writes and reduction races.
-- **Use NPZ instead of a database.** Each experiment is a small set of homogeneous
-  arrays plus metadata. A versioned archive is portable and keeps the project local;
-  no query or multi-user workload justifies a database.
+- **Reference before optimization:** the simple implementation provides an inspectable
+  behavioral contract and catches performance changes that would otherwise lack an oracle.
+- **Vectorization:** NumPy removes per-sample Python dispatch, but batches bound array
+  temporaries and avoid constructing a workload-wide tensor.
+- **CPU parallelism:** Numba assigns independent cycle/channel pairs to `prange`
+  iterations. Local accumulators and one output owner per iteration avoid data races.
+- **Bounded memory:** source adapters yield cycles; the pipeline loads, validates,
+  aligns, processes, and writes one batch before releasing it.
+- **Multi-rate alignment:** linear interpolation is understandable and deterministic;
+  nearest mode is available for discrete-like signals. Downsampling can discard
+  high-frequency information, and interpolation does not reconstruct information that
+  a low-rate sensor never measured.
+- **Correctness before speed:** every optimized result is checked against float64
+  reference output, and benchmarks fail when the documented tolerance is exceeded.
 
-More detail is available in [the numerical design](docs/DESIGN.md). A module-by-module
-walkthrough and interview preparation notes are in [PROJECT_GUIDE.md](PROJECT_GUIDE.md).
+## Limitations
 
-## Future Improvements
-
-- Measure interpolation accuracy while varying FFT zero-padding and aperture density.
-- Add a small, validated adapter for the public `fmcw3` example after documenting its
-  geometry and signal convention.
-- Evaluate thread count and NumPy chunk size as explicit runtime/memory trade-offs.
-
-CUDA, fast-factorized BP, and estimated autofocus are intentionally outside the current
-scope.
-
-## Provenance
-
-This repository develops a prior undergraduate radar topic as a new Python project
-with AI-assisted implementation and review. The original MATLAB files were not
-available in this workspace, so this is not presented as a verified port or as new
-radar research. See [docs/PROVENANCE.md](docs/PROVENANCE.md) for the full source audit.
+- This is a local CPU processing engine, not a distributed or streaming service.
+- Diagnostic rules are user-supplied thresholds, not predictive-maintenance models.
+- No factory, employer, customer, or production deployment is claimed.
+- The UCI dataset is public external demonstration data and is not bundled.
+- Linear/nearest resampling is intentionally simple; no anti-alias filter is applied
+  before downsampling.
+- Feature processing assumes each validated batch can fit in memory; batch size controls
+  that bound but does not provide out-of-core arrays within a single cycle.
+- RSS sampling is approximate, and benchmark results depend on hardware and system load.
+- The project does not infer causal faults or measure diagnostic accuracy.
