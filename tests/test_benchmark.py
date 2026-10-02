@@ -1,16 +1,14 @@
 import csv
 import json
-from sar.benchmark import run_benchmarks
+
+from telemetry_engine.benchmark import run_benchmarks
 
 
-def test_benchmark_outputs(tmp_path):
-    output = tmp_path / "benchmark.csv"
-    rows = run_benchmarks(output, [4], [2], repeats=1, threads=1)
-    assert len(rows) == 3
-    assert all(r["runtime_s"] > 0 and r["nrmse"] <= 1e-10 for r in rows)
-    assert rows[0]["speedup"] == 1
-    with output.open() as stream:
-        assert len(list(csv.DictReader(stream))) == 3
-    assert output.with_suffix(".png").is_file()
-    assert output.with_suffix(".md").is_file()
-    assert json.loads(output.with_suffix(".environment.json").read_text())["repeats"] == 1
+def test_benchmark_artifacts(tmp_path):
+    result = run_benchmarks(tmp_path, cycles=4, channels=2, samples=8, batch_size=2,
+                            repeats=1, batch_sizes=(1, 2))
+    assert len(result["backends"]) == 5
+    assert all(row["max_abs_error"] <= 1e-10 for row in result["backends"])
+    assert len(list(csv.DictReader((tmp_path / "benchmark.csv").open()))) == 5
+    assert len(json.loads((tmp_path / "benchmark_summary.json").read_text())["batch_sizes"]) == 2
+    assert (tmp_path / "benchmark_report.md").is_file()

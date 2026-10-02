@@ -1,4 +1,4 @@
-name: CPU tests
+name: Telemetry engine tests
 on: [push, pull_request]
 jobs:
   test:
@@ -9,7 +9,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       NUMBA_NUM_THREADS: '2'
-      MPLBACKEND: Agg
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -17,3 +16,7 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: python -m pip install -e ".[dev]"
       - run: python -m pytest -q
+      - run: telemetry --help
+      - run: telemetry generate-synthetic .ci-data --cycles 4 --channels 3 --samples 120 --sampling-rates 10 5 2
+      - run: telemetry validate .ci-data
+      - run: telemetry process .ci-data --backend numba --threads 2 --batch-size 2 --output .ci-results
