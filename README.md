@@ -115,6 +115,8 @@ telemetry validate data/synthetic --config configs/telemetry.yaml
 telemetry inspect data/synthetic --config configs/telemetry.yaml
 telemetry process data/synthetic --config configs/telemetry.yaml \
   --backend numba --threads 4 --batch-size 64 --output results
+telemetry benchmark-e2e --output benchmarks --cycles 1000 --raw-samples 6000 \
+  --batch-size 128 --threads 4 --warm-repeats 3
 ```
 
 ## Example Workflow
@@ -156,6 +158,24 @@ These results compare against a deliberately readable Python oracle, not optimiz
 or a distributed system. Full p95, warm-up, environment, and RSS data are in
 [`benchmarks/benchmark_report.md`](benchmarks/benchmark_report.md).
 
+### End-to-end performance
+
+A separate system-level benchmark times the complete path from 1,000 on-disk cycle
+files through validation, 10 Hz alignment, Numba feature processing, three diagnostic
+rules, and CSV/JSON artifact output. Synthetic generation is excluded. After a separately
+reported first run, three warm runs had a **2.554 s median**, **2.905 s p95**, and
+**391.5 cycles/s** throughput for 5 channels and 600 aligned samples per channel.
+
+| Backend | Threads | Workload | Batch | Median | P95 | Throughput | Sampled peak RSS |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Numba | 4 | 1,000 cycles × 5 channels | 128 | 2.554 s | 2.905 s | **391.5 cycles/s** | 136.0 MiB |
+
+The first in-process run took 23.250 s and may include Numba initialization,
+compilation, or cache loading. Later runs may benefit from operating-system file
+caching. Exact methodology and raw measurements are in
+[`benchmarks/end_to_end.md`](benchmarks/end_to_end.md) and
+[`benchmarks/end_to_end.json`](benchmarks/end_to_end.json).
+
 ## Batch Processing
 
 The batch study generated and released one batch at a time. Feature-call runtime excludes
@@ -188,7 +208,7 @@ python -m pytest -q
 python -m pytest --cov=telemetry_engine --cov-report=term-missing -q
 ```
 
-The current local result is **40 passed** with **76% measured statement coverage**.
+The current local result is **41 passed** with **78% measured statement coverage**.
 GitHub Actions runs installation, the full suite, CLI help, synthetic generation,
 validation, and a Numba processing smoke test on Windows and Linux with Python 3.11
 and 3.13.
@@ -204,7 +224,7 @@ src/telemetry_engine/
 ├── features.py        Reference, NumPy, and Numba feature backends
 ├── rules.py           threshold-based diagnostic flags
 ├── pipeline.py        bounded-memory orchestration and outputs
-├── benchmark.py       isolated timing, correctness, and RSS study
+├── benchmark.py       kernel and end-to-end timing, correctness, and RSS studies
 └── cli.py             developer commands and error handling
 tests/                 unit, integration, failure-path, CLI, and benchmark tests
 configs/telemetry.yaml example alignment, batching, validation, and rule configuration

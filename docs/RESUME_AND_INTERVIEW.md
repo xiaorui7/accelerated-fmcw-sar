@@ -6,7 +6,11 @@
 
 - Built a validated processing engine for heterogeneous industrial telemetry, aligning multi-rate pressure, flow, temperature, vibration, and power channels into configurable per-cycle numerical features.
 - Designed interchangeable Python, NumPy, and parallel Numba backends, reaching 21,789 cycles/second and 27.34× reference throughput across 1,000 cycles with verified numerical agreement.
-- Implemented bounded-memory batching with 10.4 MiB lower peak RSS at batch 32 versus 256, backed by 40 tests, 76% coverage, correctness guards, and cross-platform CI.
+- Implemented bounded-memory batching with 10.4 MiB lower peak RSS at batch 32 versus 256, backed by 41 tests, 78% coverage, correctness guards, and cross-platform CI.
+
+For a broader SDE audience, bullet 2 can instead use the system-level result:
+
+- Benchmarked the complete file-to-output pipeline at 391.5 cycles/second across 1,000 multi-rate cycles, including loading, validation, alignment, parallel feature extraction, diagnostic rules, and structured output.
 
 ## Interview questions
 

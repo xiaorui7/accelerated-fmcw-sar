@@ -55,3 +55,11 @@ Only feature calls count toward runtime; RSS sampling covers generation and proc
 This isolates the feature engine while measuring batch working-set growth. Numba
 compilation is warmed and reported separately. Neither study is end-to-end application
 latency.
+
+The end-to-end study generates its synthetic files before timing, then measures the
+complete `SyntheticDataset.iter_cycles()` to `process_to_directory()` path. Its timed
+scope includes NPZ loading, validation, alignment, feature processing, diagnostic rules,
+and all four output artifacts. It reports the first in-process run separately, then uses
+three later runs for median and p95. Those later runs may benefit from operating-system
+file caching, so the report states that limitation rather than presenting the result as
+cold-start latency.

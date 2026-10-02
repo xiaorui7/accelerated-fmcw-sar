@@ -23,8 +23,8 @@ UCI/synthetic files -> adapter -> TelemetryCycle -> validation -> alignment
 - `features.py`: common Reference, NumPy, and parallel Numba feature interface.
 - `pipeline.py`: duplicate detection, batching, incremental artifact writing, metadata.
 - `rules.py`: configuration-driven min/max diagnostics.
-- `benchmark.py`: isolated timing, p95, throughput, correctness, and RSS collection.
-- `cli.py`: five developer commands with meaningful exit code 2 for invalid input.
+- `benchmark.py`: isolated kernel and end-to-end timing, p95, throughput, correctness, and RSS collection.
+- `cli.py`: six developer commands with meaningful exit code 2 for invalid input.
 - Old radar source, configs, figures, benchmark claims, docs, and tests were removed.
 
 ## D. Real data support
@@ -38,8 +38,8 @@ present, maps names/units, and yields the internal model without loading the ful
 
 ```text
 python -m pytest --cov=telemetry_engine --cov-report=term-missing -q
-40 passed in 14.79s
-TOTAL 773 statements, 186 missed, 76% coverage
+41 passed in 17.21s
+TOTAL 849 statements, 187 missed, 78% coverage
 ```
 
 Runtime varies; counts and coverage are the reproducible result.
@@ -56,6 +56,13 @@ Runtime varies; counts and coverage are the reproducible result.
 
 Workload: 1,000 cycles, 5 channels, 600 samples/channel, batch 128, three repetitions.
 Machine: Intel Core Ultra 9 285H, Windows 11, Python 3.13.12, NumPy 2.4.4, Numba 0.68.0.
+
+The separate end-to-end benchmark measured the full load → validation → alignment →
+features → rules → output path on the same 1,000-cycle, 5-channel, 60-second workload.
+With Numba at four threads and batch 128, three warm runs produced a 2.554 s median,
+2.905 s p95, and 391.5 cycles/s. The first in-process run was 23.250 s and is reported
+separately because it may include Numba initialization, compilation, or cache loading.
+Synthetic generation was outside the timed region.
 
 ## G. Memory/batch results
 
@@ -85,12 +92,13 @@ were `2.22e-16`. Both are below the benchmark threshold of `1e-10`.
 | Parallelizes safely across CPU threads | `features.py: _numba_kernel` | 1T/2T/4T rows in `benchmark.csv` |
 | Processes in bounded batches | `pipeline.py: batched`, `process_to_directory` | `test_batched_sizes`; `batch_sizes.csv` |
 | Produces structured outputs and metadata | `pipeline.py: process_to_directory` | `test_structured_outputs`, CLI integration test |
+| Processes 1,000 cycles end-to-end at 391.5 cycles/s | `benchmark.py: run_end_to_end_benchmark` | `end_to_end.json`; `test_end_to_end_benchmark_artifacts` |
 | Applies configurable diagnostics | `rules.py: apply_rules` | `test_rule_flags_high_value`, invalid-key test |
-| Has 40 passing tests and 76% coverage | `tests/`, pytest configuration | saved command/result in this audit |
+| Has 41 passing tests and 78% coverage | `tests/`, pytest configuration | saved command/result in this audit |
 
 ## J. Limitations
 
 Do not claim production or factory deployment, users, saved money/time, downtime
 reduction, diagnostic accuracy, predictive maintenance, distributed scale, or exact
-memory allocation measurement. The performance study measures warmed aligned feature
-processing; it is not end-to-end file-to-output latency.
+memory allocation measurement. The 391.5 cycles/s result is warm file-to-output
+throughput on this machine; it is not cold-start, distributed, or production latency.

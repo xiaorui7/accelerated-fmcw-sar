@@ -16,7 +16,10 @@ import numba
 import numpy as np
 import psutil
 
+from .config import EngineConfig, RuleConfig
+from .datasets.synthetic import DEFAULT_NAMES, SyntheticDataset, generate_synthetic_dataset
 from .features import get_backend, reference_features
+from .pipeline import process_to_directory
 
 
 def _cpu_name() -> str:
@@ -57,6 +60,30 @@ def _measure_memory(function, values, batch_size):
         stop.set()
         thread.join()
     return max(samples) / 2**20, (max(samples) - baseline) / 2**20
+
+
+def _measure_call(function):
+    """Measure wall time and sampled RSS for one complete callable."""
+    process = psutil.Process()
+    baseline = process.memory_info().rss
+    samples = [baseline]
+    stop = threading.Event()
+
+    def monitor():
+        while not stop.wait(.001):
+            samples.append(process.memory_info().rss)
+
+    thread = threading.Thread(target=monitor, daemon=True)
+    thread.start()
+    started = time.perf_counter()
+    try:
+        result = function()
+        elapsed = time.perf_counter() - started
+        samples.append(process.memory_info().rss)
+    finally:
+        stop.set()
+        thread.join()
+    return result, elapsed, max(samples) / 2**20, (max(samples) - baseline) / 2**20
 
 
 def _worker(backend: str, threads: int, cycles: int, channels: int, samples: int,
@@ -216,6 +243,129 @@ def run_benchmarks(output: str | Path, cycles: int = 1000, channels: int = 5,
     (output / "benchmark_summary.json").write_text(json.dumps({"backends": rows, "batch_sizes": batch_rows, "environment": environment}, indent=2) + "\n", encoding="utf-8")
     (output / "benchmark_report.md").write_text(_report(rows, batch_rows, environment), encoding="utf-8")
     return {"backends": rows, "batch_sizes": batch_rows, "environment": environment}
+
+
+def _end_to_end_report(result: dict) -> str:
+    workload = result["workload"]
+    measured = result["measurement"]
+    config = result["configuration"]
+    text = "# End-to-End Telemetry Benchmark\n\n"
+    text += ("This measurement covers cycle-file loading, validation, multi-rate alignment, "
+             "feature processing, diagnostic rules, and CSV/JSON output. Synthetic dataset "
+             "generation is outside the timed region.\n\n")
+    text += "| Backend | Threads | Cycles | Channels | Raw samples at max rate | Aligned samples | Batch | Warm median | P95 | Throughput | Peak RSS |\n"
+    text += "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n"
+    text += (f"| {config['backend']} | {config['threads']} | {workload['cycles']} | "
+             f"{workload['channels']} | {workload['raw_samples_at_max_rate']} | "
+             f"{workload['aligned_samples_per_channel']} | {config['batch_size']} | "
+             f"{measured['median_runtime_s']:.6f} s | {measured['p95_runtime_s']:.6f} s | "
+             f"{measured['throughput_cycles_s']:.1f} cycles/s | "
+             f"{measured['sampled_peak_rss_mib']:.1f} MiB |\n\n")
+    text += (f"The first in-process run took {measured['first_run_runtime_s']:.6f} s. "
+             f"The reported steady-state median uses {measured['warm_repeats']} subsequent runs; "
+             "the first run may include Numba initialization, compilation, or cache loading. "
+             "Operating-system file caching can benefit later runs. RSS is sampled every 1 ms.\n\n")
+    text += "## Environment\n\n"
+    environment = result["environment"]
+    text += (f"- CPU: {environment['processor']}\n- OS: {environment['platform']}\n"
+             f"- Python: {environment['python_version']}\n"
+             f"- NumPy: {environment['packages']['numpy']}\n"
+             f"- Numba: {environment['packages']['numba']}\n")
+    return text
+
+
+def run_end_to_end_benchmark(output: str | Path, cycles: int = 1000,
+                             raw_samples: int = 6000, batch_size: int = 128,
+                             threads: int = 4, warm_repeats: int = 3,
+                             seed: int = 2026) -> dict:
+    """Benchmark the complete synthetic-file-to-artifacts processing path."""
+    if any(type(value) is not int or value < 1
+           for value in (cycles, raw_samples, batch_size, threads, warm_repeats)):
+        raise ValueError("end-to-end benchmark sizes, threads, and repeats must be positive integers")
+    if raw_samples < 2:
+        raise ValueError("raw_samples must be at least 2")
+    output = Path(output)
+    output.mkdir(parents=True, exist_ok=True)
+    config = EngineConfig(
+        target_rate_hz=10.0,
+        alignment="linear",
+        batch_size=batch_size,
+        required_channels=DEFAULT_NAMES,
+        rules={
+            "vibration_1_rms": RuleConfig(maximum=50.0, flag="HIGH_VIBRATION"),
+            "temperature_1_max": RuleConfig(maximum=80.0, flag="HIGH_TEMPERATURE"),
+            "pressure_1_max": RuleConfig(maximum=250.0, flag="HIGH_PRESSURE"),
+        },
+    )
+    with tempfile.TemporaryDirectory(prefix="telemetry-e2e-") as temporary:
+        root = Path(temporary)
+        dataset_path = generate_synthetic_dataset(root / "data", cycles, len(DEFAULT_NAMES),
+                                                  raw_samples, seed=seed)
+        dataset_bytes = sum(path.stat().st_size for path in dataset_path.rglob("*") if path.is_file())
+
+        def run_once(index: int):
+            run_output = root / f"run-{index}"
+            dataset = SyntheticDataset(dataset_path)
+            return _measure_call(lambda: process_to_directory(
+                dataset.iter_cycles(), config, run_output, "numba", threads,
+                f"synthetic:{dataset_path}",
+            ))
+
+        _, first_time, first_peak, first_increase = run_once(0)
+        warm_measurements = [run_once(index + 1) for index in range(warm_repeats)]
+        warm_times = [item[1] for item in warm_measurements]
+        median = float(np.median(warm_times))
+        duration = raw_samples / max(item["sampling_rate_hz"] for item in
+                                     SyntheticDataset(dataset_path).manifest["channels"])
+        aligned_samples = max(1, int(np.floor(duration * config.target_rate_hz + 1e-12)))
+        last_summary = warm_measurements[-1][0]
+        artifact_bytes = sum(path.stat().st_size for path in (root / f"run-{warm_repeats}").rglob("*")
+                             if path.is_file())
+    actual_threads = min(threads, numba.config.NUMBA_NUM_THREADS)
+    result = {
+        "workload": {
+            "cycles": cycles,
+            "channels": len(DEFAULT_NAMES),
+            "raw_samples_at_max_rate": raw_samples,
+            "aligned_samples_per_channel": aligned_samples,
+            "duration_seconds": duration,
+            "dataset_bytes": dataset_bytes,
+        },
+        "configuration": {
+            "backend": "numba", "threads": actual_threads, "batch_size": batch_size,
+            "target_rate_hz": config.target_rate_hz, "alignment": config.alignment,
+            "diagnostic_rules": len(config.rules),
+        },
+        "measurement": {
+            "first_run_runtime_s": first_time,
+            "first_run_sampled_peak_rss_mib": first_peak,
+            "first_run_sampled_rss_increase_mib": first_increase,
+            "warm_run_runtime_s": warm_times,
+            "warm_repeats": warm_repeats,
+            "median_runtime_s": median,
+            "p95_runtime_s": float(np.percentile(warm_times, 95)),
+            "throughput_cycles_s": cycles / median,
+            "sampled_peak_rss_mib": max(item[2] for item in warm_measurements),
+            "sampled_rss_increase_mib": max(item[3] for item in warm_measurements),
+            "output_artifact_bytes": artifact_bytes,
+        },
+        "result_summary": last_summary,
+        "environment": {
+            "utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "platform": platform.platform(), "processor": _cpu_name(),
+            "logical_cpus": os.cpu_count(), "python_version": platform.python_version(),
+            "packages": {name: importlib.metadata.version(name) for name in ("numpy", "numba", "psutil")},
+        },
+        "methodology": {
+            "timed_scope": ["load", "validation", "alignment", "feature processing",
+                            "diagnostic rules", "artifact output"],
+            "excluded": ["synthetic dataset generation", "benchmark report generation"],
+            "notes": "First run reported separately; median and p95 use subsequent runs. OS file caching may benefit warm runs. RSS sampled every 1 ms.",
+        },
+    }
+    (output / "end_to_end.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+    (output / "end_to_end.md").write_text(_end_to_end_report(result), encoding="utf-8")
+    return result
 
 
 if __name__ == "__main__":

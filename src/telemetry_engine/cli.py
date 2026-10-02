@@ -3,7 +3,7 @@ import argparse
 import json
 from pathlib import Path
 
-from .benchmark import run_benchmarks
+from .benchmark import run_benchmarks, run_end_to_end_benchmark
 from .config import load_config
 from .datasets.source import open_dataset
 from .datasets.synthetic import generate_synthetic_dataset
@@ -40,6 +40,15 @@ def _parser() -> argparse.ArgumentParser:
     benchmark.add_argument("--batch-size", type=int, default=128)
     benchmark.add_argument("--batch-sizes", nargs="+", type=int, default=[32, 64, 128, 256])
     benchmark.add_argument("--repeats", type=int, default=3)
+    end_to_end = commands.add_parser("benchmark-e2e", help="benchmark the complete file-to-artifacts workflow")
+    end_to_end.add_argument("--output", type=Path, default=Path("benchmarks"))
+    end_to_end.add_argument("--cycles", type=int, default=1000)
+    end_to_end.add_argument("--raw-samples", type=int, default=6000,
+                            help="samples at the highest input channel rate")
+    end_to_end.add_argument("--batch-size", type=int, default=128)
+    end_to_end.add_argument("--threads", type=int, default=4)
+    end_to_end.add_argument("--warm-repeats", type=int, default=3)
+    end_to_end.add_argument("--seed", type=int, default=2026)
     return parser
 
 
@@ -56,6 +65,16 @@ def main(argv: list[str] | None = None) -> None:
             result = run_benchmarks(args.output, args.cycles, args.channels, args.samples,
                                     args.batch_size, args.repeats, tuple(args.batch_sizes))
             print(json.dumps({"output": str(args.output), "cases": len(result["backends"])}))
+            return
+        if args.command == "benchmark-e2e":
+            result = run_end_to_end_benchmark(args.output, args.cycles, args.raw_samples,
+                                              args.batch_size, args.threads,
+                                              args.warm_repeats, args.seed)
+            print(json.dumps({
+                "output": str(args.output),
+                "median_runtime_s": result["measurement"]["median_runtime_s"],
+                "throughput_cycles_s": result["measurement"]["throughput_cycles_s"],
+            }))
             return
         config = load_config(args.config)
         if args.command == "process" and args.batch_size is not None:

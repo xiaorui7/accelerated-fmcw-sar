@@ -30,6 +30,11 @@ def test_cli_end_to_end(tmp_path, capsys):
     output = tmp_path / "output"
     main(["process", str(data), "--backend", "numpy", "--batch-size", "2", "--output", str(output)])
     assert json.loads((output / "summary.json").read_text())["cycles_processed"] == 3
+    benchmark = tmp_path / "benchmark"
+    main(["benchmark-e2e", "--output", str(benchmark), "--cycles", "2",
+          "--raw-samples", "20", "--batch-size", "1", "--threads", "1",
+          "--warm-repeats", "1"])
+    assert json.loads((benchmark / "end_to_end.json").read_text())["workload"]["cycles"] == 2
     assert "synthetic" in capsys.readouterr().out
 
 
@@ -37,4 +42,3 @@ def test_cli_bad_input(tmp_path):
     with pytest.raises(SystemExit) as error:
         main(["validate", str(tmp_path)])
     assert error.value.code == 2
-

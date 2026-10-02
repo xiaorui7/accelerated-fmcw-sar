@@ -22,3 +22,5 @@ Use these exercises before an interview:
 6. Run Numba with one and four threads and explain why each output row has one owner.
 7. Add a new threshold rule without touching any numerical backend.
 8. State the limitations in the README without overstating the UCI demonstration.
+9. Compare the 21,789-cycle/s feature result with the 391.5-cycle/s end-to-end result
+   and explain the cost of loading, alignment, rules, and output.
